@@ -7,12 +7,12 @@ import android.database.Cursor;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
-
 import com.sonification.accessibleweather.databases.DatabaseCachedWeather;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
@@ -61,6 +61,8 @@ public class LocationFetcher extends Service
     int method1State;
     int method2State;
 
+    boolean wundergroundIPSuccess = false;
+
     LocationManager locationManager;
 
     static final int FINE_LOCATION_TIMEOUT = 60000; // 1 minute timeout
@@ -96,24 +98,13 @@ public class LocationFetcher extends Service
     private void fetchLocation() {
         // Get the last known location
         boolean methodLastKnownSuccess = methodLastKnown();
-        boolean wundergroundIPMethodSuccess = false;
-        boolean databaseMethodSuccess = false;
+        methodLastKnownSuccess = false;
         if (!methodLastKnownSuccess) {
-            // Use wunderground's IP method
-            wundergroundIPMethodSuccess = methodWundergroundIP();
-            if (! wundergroundIPMethodSuccess) {
-                // Use the last used location in database
-                databaseMethodSuccess = methodDatabase();
-            }
-        }
-        if (methodLastKnownSuccess || wundergroundIPMethodSuccess || databaseMethodSuccess) {
-            // Create a broadcast with this "uncertain" location
-            sendMessage(UNCERTAIN);
+            // Try to get using wunderground IP
+            LoadData task = new LoadData();
+            task.execute();
         }
         else {
-            // Creating a broadcast with 0,0 means that method failed
-            latitude = "0";
-            longitude = "0";
             sendMessage(UNCERTAIN);
         }
 
@@ -175,15 +166,6 @@ public class LocationFetcher extends Service
             longitude = "0";
             sendMessage(CONFIDENT);
         }
-
-
-
-        // Start keeping track of the time here
-        // Start a thread that TIME_OUT time in the future will return
-        // On returning do nothing if we have gone forward else bump up the attemptNumber and call getLocationUpdate() again
-        // And also remove the location listener
-
-
 
         /*else
         {
@@ -292,6 +274,7 @@ public class LocationFetcher extends Service
         String linkLatLong = "http://api.wunderground.com/api/16337742f9b11efe/conditions/q/autoip.json";
         String responseString;
 
+
         HttpClient httpClient = new DefaultHttpClient();
         HttpContext localContext = new BasicHttpContext();
         HttpGet httpGet = new HttpGet(linkLatLong);
@@ -304,16 +287,17 @@ public class LocationFetcher extends Service
         }
         catch (ClientProtocolException e)
         {
-            Log.e("Location", "Auto IP failed");
+            Log.e("Location", "Auto IP failed exception 1");
             return false;
         }
         catch (IOException e)
         {
-            Log.e("Location", "Auto IP failed");
+            Log.e("Location", "Auto IP failed exception 2");
             return false;
         }
 
         try {
+            Log.e("Location", responseString);
             JSONObject mainObject = new JSONObject(responseString);
             JSONArray observationArray = mainObject.getJSONArray("current_observation");
             JSONObject displayLocation = observationArray.getJSONObject(1);
@@ -322,7 +306,7 @@ public class LocationFetcher extends Service
             longitude = displayLocation.getString("longitude");
 
         } catch(JSONException e) {
-            Log.e("Location", "Auto IP failed");
+            Log.e("Location", "Auto IP failed exception 3");
             return false;
         }
 
@@ -432,4 +416,40 @@ public class LocationFetcher extends Service
             }
         }
     };
+
+    // Hit wunderground IP in the background
+    public class LoadData extends AsyncTask<Void, Void, Void>
+    {
+        @Override
+        protected void onPreExecute()
+        {
+            // Do nothing
+        }
+
+        @Override
+        protected Void doInBackground(Void... params)
+        {
+            // Get the Lat lon from IP
+            wundergroundIPSuccess = methodWundergroundIP();
+
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(Void result)
+        {
+            super.onPostExecute(result);
+            if (wundergroundIPSuccess) {
+                sendMessage(UNCERTAIN);
+            }
+            else if (methodDatabase()) {
+                sendMessage(UNCERTAIN);
+            }
+            else {
+                latitude = "0";
+                longitude = "0";
+                sendMessage(UNCERTAIN);
+            }
+        }
+    }
 }
